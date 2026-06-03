@@ -1,0 +1,25 @@
+用途,文件名,放置位置,建议尺寸,说明
+普通-待机,pet-idle.png,src/assets,188x208 或等比例透明 PNG,普通状态默认形象
+普通-说话,pet-talk.png,src/assets,188x208 或等比例透明 PNG,点击互动或显示文案时使用
+普通-开心,pet-happy.png,src/assets,188x208 或等比例透明 PNG,开心状态
+普通-思考,pet-thinking.png,src/assets,188x208 或等比例透明 PNG,思考状态
+普通-睡觉,pet-sleep.png,src/assets,188x208 或等比例透明 PNG,睡眠状态
+普通-醒来,pet-wake.png,src/assets,188x208 或等比例透明 PNG,醒来动作预留
+普通-悬停,pet-hover.png,src/assets,188x208 或等比例透明 PNG,鼠标悬停动作预留
+普通-点击,pet-click.png,src/assets,188x208 或等比例透明 PNG,点击动作预留
+普通-拖拽,pet-drag.png,src/assets,188x208 或等比例透明 PNG,拖拽动作预留
+普通-惊讶,pet-surprised.png,src/assets,188x208 或等比例透明 PNG,惊讶动作预留
+普通-确认,pet-confirm.png,src/assets,188x208 或等比例透明 PNG,成功或确认反馈预留
+普通-错误,pet-error.png,src/assets,188x208 或等比例透明 PNG,错误反馈预留
+小游戏-进入,game-enter.png,src/assets,188x208 或等比例透明 PNG,进入小游戏动作预留
+小游戏-热气球待机,game-balloon-idle.png,src/assets,188x208 或等比例透明 PNG,小游戏默认热气球形态
+小游戏-瞄准,game-balloon-aim.png,src/assets,188x208 或等比例透明 PNG,长按蓄力瞄准时使用
+小游戏-射击,game-balloon-shoot.png,src/assets,188x208 或等比例透明 PNG,发射弓箭时使用
+小游戏-命中,game-balloon-hit.png,src/assets,188x208 或等比例透明 PNG,命中反馈动作
+小游戏-未命中,game-balloon-miss.png,src/assets,188x208 或等比例透明 PNG,未命中反馈预留
+小游戏-庆祝,game-balloon-celebrate.png,src/assets,188x208 或等比例透明 PNG,庆祝动作预留
+小游戏-退出,game-exit.png,src/assets,188x208 或等比例透明 PNG,退出小游戏动作预留
+小游戏-弓箭,game-arrow.png,src/assets,46x12 或等比例透明 PNG,从右向左飞行的弓箭
+小游戏-目标,game-target.png,src/assets,64x72 或等比例透明 PNG,左侧漂浮目标
+小游戏-目标命中,game-target-hit.png,src/assets,64x72 或等比例透明 PNG,目标被命中时的图片
+小游戏-命中特效,game-hit-effect.png,src/assets,92x92 或等比例透明 PNG,命中瞬间的特效
