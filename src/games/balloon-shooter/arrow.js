@@ -1,4 +1,4 @@
-import { applyImageAsset, getGameAsset } from '../../assetMap.js';
+import { applyImageAsset } from '../../assetMap.js';
 
 const arrowSize = {
   width: 46,
@@ -13,7 +13,7 @@ const physics = {
   gravity: 560
 };
 
-export function createArrowManager({ layer }) {
+export function createArrowManager({ layer, skinManager }) {
   const arrows = new Set();
 
   function shoot(origin, chargeLevel = 0) {
@@ -25,7 +25,7 @@ export function createArrowManager({ layer }) {
       velocityY: physics.baseVelocityY + physics.extraVelocityY * charge,
       width: arrowSize.width,
       height: arrowSize.height,
-      element: createArrowElement()
+      element: createArrowElement(skinManager)
     };
 
     layer.append(arrow.element);
@@ -81,14 +81,14 @@ export function createArrowManager({ layer }) {
   };
 }
 
-function createArrowElement() {
+function createArrowElement(skinManager) {
   const element = document.createElement('div');
   element.className = 'game-arrow';
   const image = document.createElement('img');
 
   image.className = 'game-arrow__image';
   image.alt = '';
-  applyImageAsset(image, getGameAsset('arrow'));
+  applyImageAsset(image, skinManager.getActionAsset('game', 'arrow'));
   element.append(image);
 
   return element;

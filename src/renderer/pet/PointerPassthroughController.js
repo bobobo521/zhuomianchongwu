@@ -11,19 +11,19 @@ export function createPointerPassthroughController({
   });
 
   window.addEventListener('mouseleave', () => {
-    setMouseIgnore(true);
+    setMouseIgnore(!isSettingsOpen());
   });
 
   window.addEventListener('blur', () => {
-    setMouseIgnore(true);
+    setMouseIgnore(!isSettingsOpen());
   });
 
   window.requestAnimationFrame(() => {
-    setMouseIgnore(true);
+    setMouseIgnore(!isSettingsOpen());
   });
 
   function updatePointerMode(x, y) {
-    if (document.body.dataset.settingsOpen === 'true') {
+    if (isSettingsOpen()) {
       setMouseIgnore(false);
       return;
     }
@@ -76,17 +76,23 @@ export function createPointerPassthroughController({
   }
 
   function setMouseIgnore(shouldIgnore) {
-    if (isIgnoring === shouldIgnore) {
+    const nextShouldIgnore = isSettingsOpen() ? false : shouldIgnore;
+
+    if (isIgnoring === nextShouldIgnore) {
       return;
     }
 
-    isIgnoring = shouldIgnore;
-    pointerApi.setMouseIgnore(shouldIgnore);
+    isIgnoring = nextShouldIgnore;
+    pointerApi.setMouseIgnore(nextShouldIgnore);
+  }
+
+  function isSettingsOpen() {
+    return document.body.dataset.settingsOpen === 'true';
   }
 
   return {
     refresh() {
-      setMouseIgnore(true);
+      setMouseIgnore(!isSettingsOpen());
     },
     disable() {
       setMouseIgnore(false);

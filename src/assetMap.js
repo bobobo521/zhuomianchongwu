@@ -10,8 +10,11 @@ const assetPaths = {
     click: './assets/pet-click.png',
     drag: './assets/pet-drag.png',
     surprised: './assets/pet-surprised.png',
+    alert: './assets/pet-alert.png',
     confirm: './assets/pet-confirm.png',
-    error: './assets/pet-error.png'
+    error: './assets/pet-error.png',
+    rest: './assets/pet-rest.png',
+    celebrate: './assets/pet-celebrate.png'
   },
   game: {
     gameEnter: './assets/game-enter.png',
@@ -40,8 +43,11 @@ const fallbackText = {
   click: 'CLICK',
   drag: 'DRAG',
   surprised: '!',
+  alert: 'ALERT',
   confirm: 'OK',
   error: 'ERR',
+  rest: 'REST',
+  celebrate: 'YEAH',
   gameEnter: 'ENTER',
   balloonIdle: 'BALLOON',
   balloonAim: 'AIM',

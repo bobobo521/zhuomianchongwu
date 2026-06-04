@@ -1,16 +1,16 @@
 const fallbackMessages = {
   weather: '天气模块已预留，后续会接入真实天气。',
-  codex: 'Codex 进度暂时读不到，我会继续留意。',
   jimeng: '即梦监控已预留，后续会读取生成进度。',
-  calendar: '日历提醒暂时读不到，我会继续留意。'
+  calendar: '日历提醒暂时读不到，我会继续留意。',
+  codex: 'Codex 状态提醒已预留，我会留意任务状态。'
 };
 
 export function createInformationModuleRegistry({
   messageProvider,
   weatherService,
-  codexService,
   jimengService,
-  calendarService
+  calendarService,
+  codexService
 }) {
   const modules = new Map();
 
@@ -26,12 +26,6 @@ export function createInformationModuleRegistry({
     }
   });
 
-  register('codex', {
-    getMessage() {
-      return codexService?.getMessage() ?? fallbackMessages.codex;
-    }
-  });
-
   register('jimeng', {
     getMessage() {
       return jimengService?.getMessage() ?? fallbackMessages.jimeng;
@@ -41,6 +35,12 @@ export function createInformationModuleRegistry({
   register('calendar', {
     getMessage() {
       return calendarService?.getMessage() ?? fallbackMessages.calendar;
+    }
+  });
+
+  register('codex', {
+    getMessage() {
+      return codexService?.getMessage() ?? fallbackMessages.codex;
     }
   });
 

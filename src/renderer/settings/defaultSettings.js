@@ -4,6 +4,9 @@ export const defaultSettings = {
   idleSleepDelayMs: 60000,
   petScale: 1,
   languageStyle: 'gentle',
+  skin: {
+    currentSkinId: 'default'
+  },
   weather: {
     city: '北京',
     refreshIntervalMs: 600000,
@@ -14,25 +17,24 @@ export const defaultSettings = {
     pollIntervalMs: 30000,
     completionNotification: true
   },
-  codex: {
-    statusPath: '',
-    pollIntervalMs: 15000,
-    usageReminder: true,
-    usageReminderIntervalMs: 5400000,
-    resetReminderDelayMs: 18000000,
-    freshEventWindowMs: 600000
-  },
   calendar: {
     pollIntervalMs: 60000,
     lookAheadMinutes: 1440,
     notifyBeforeMinutes: 10,
     systemNotification: true
   },
+  codexReminderEnabled: true,
+  codexWaitingReminderEnabled: true,
+  codexCompletedReminderEnabled: true,
+  codexFailedReminderEnabled: true,
+  codexPausedReminderEnabled: true,
+  codexCheckInterval: 60000,
+  codexStatusFilePath: '',
   modules: {
     weather: true,
-    codex: true,
     jimeng: true,
     calendar: true,
+    codex: true,
     local: true
   },
   customMessages: {
@@ -263,14 +265,15 @@ export function normalizeSettings(settings = {}) {
     idleSleepDelayMs: normalizeNumber(settings.idleSleepDelayMs, defaultSettings.idleSleepDelayMs, 5000, 1800000),
     petScale: normalizeNumber(settings.petScale, defaultSettings.petScale, 0.5, 1.8),
     languageStyle: normalizeLanguageStyle(settings.languageStyle),
-    modules: {
-      ...defaultSettings.modules,
-      ...(settings.modules ?? {})
+    skin: {
+      ...defaultSettings.skin,
+      ...(settings.skin ?? {})
     },
+    modules: normalizeModules(settings.modules),
     weather: normalizeWeatherSettings(settings.weather),
-    codex: normalizeCodexSettings(settings.codex),
     jimeng: normalizeJimengSettings(settings.jimeng),
     calendar: normalizeCalendarSettings(settings.calendar),
+    ...normalizeCodexReminderSettings(settings),
     customMessages: normalizeMessages(settings.customMessages ?? settings.messages),
     messageStyles: defaultSettings.messageStyles
   };
@@ -287,6 +290,15 @@ export function getLanguageStyleOptions() {
 
 function normalizeLanguageStyle(style) {
   return defaultSettings.messageStyles[style] ? style : defaultSettings.languageStyle;
+}
+
+function normalizeModules(modules = {}) {
+  return Object.fromEntries(
+    Object.entries(defaultSettings.modules).map(([name, enabled]) => [
+      name,
+      modules[name] ?? enabled
+    ])
+  );
 }
 
 function normalizeMessages(messages = {}) {
@@ -320,38 +332,24 @@ function normalizeJimengSettings(jimeng = {}) {
   };
 }
 
-function normalizeCodexSettings(codex = {}) {
-  return {
-    statusPath: String(codex.statusPath ?? defaultSettings.codex.statusPath).trim(),
-    pollIntervalMs: normalizeNumber(codex.pollIntervalMs, defaultSettings.codex.pollIntervalMs, 5000, 300000),
-    usageReminder: codex.usageReminder !== false,
-    usageReminderIntervalMs: normalizeNumber(
-      codex.usageReminderIntervalMs,
-      defaultSettings.codex.usageReminderIntervalMs,
-      60000,
-      21600000
-    ),
-    resetReminderDelayMs: normalizeNumber(
-      codex.resetReminderDelayMs,
-      defaultSettings.codex.resetReminderDelayMs,
-      60000,
-      86400000
-    ),
-    freshEventWindowMs: normalizeNumber(
-      codex.freshEventWindowMs,
-      defaultSettings.codex.freshEventWindowMs,
-      60000,
-      3600000
-    )
-  };
-}
-
 function normalizeCalendarSettings(calendar = {}) {
   return {
     pollIntervalMs: normalizeNumber(calendar.pollIntervalMs, defaultSettings.calendar.pollIntervalMs, 15000, 1800000),
     lookAheadMinutes: normalizeNumber(calendar.lookAheadMinutes, defaultSettings.calendar.lookAheadMinutes, 10, 10080),
     notifyBeforeMinutes: normalizeNumber(calendar.notifyBeforeMinutes, defaultSettings.calendar.notifyBeforeMinutes, 0, 1440),
     systemNotification: calendar.systemNotification !== false
+  };
+}
+
+function normalizeCodexReminderSettings(settings = {}) {
+  return {
+    codexReminderEnabled: settings.codexReminderEnabled !== false,
+    codexWaitingReminderEnabled: settings.codexWaitingReminderEnabled !== false,
+    codexCompletedReminderEnabled: settings.codexCompletedReminderEnabled !== false,
+    codexFailedReminderEnabled: settings.codexFailedReminderEnabled !== false,
+    codexPausedReminderEnabled: settings.codexPausedReminderEnabled !== false,
+    codexCheckInterval: normalizeNumber(settings.codexCheckInterval, defaultSettings.codexCheckInterval, 1000, 1800000),
+    codexStatusFilePath: String(settings.codexStatusFilePath || '').trim()
   };
 }
 

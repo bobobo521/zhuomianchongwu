@@ -1,0 +1,12 @@
+{
+  "source": "codex",
+  "isOpen": true,
+  "isRunning": false,
+  "taskId": "codex-status-reminder-module",
+  "taskName": "新增 Codex 状态提醒模块",
+  "status": "completed",
+  "progress": 100,
+  "waitingForConfirmation": false,
+  "updatedAt": "2026-06-04T17:42:49+08:00",
+  "message": "任务已完成，建议运行项目测试"
+}

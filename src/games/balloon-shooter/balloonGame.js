@@ -23,7 +23,7 @@ const pointerSettings = {
 
 const hitMessages = ['命中！', '好球！', '再来一发！', '太准了！'];
 
-export function createBalloonGame({ petView, gameView, petStateMachine, bubbleView }) {
+export function createBalloonGame({ petView, gameView, petStateMachine, bubbleView, skinManager }) {
   let isActive = false;
   let animationFrame = null;
   let startedAt = 0;
@@ -34,9 +34,9 @@ export function createBalloonGame({ petView, gameView, petStateMachine, bubbleVi
   let layoutTimer = null;
   let shouldIgnoreMouse = false;
   let petScale = 1;
-  const arrowManager = createArrowManager({ layer: gameView.projectileLayer });
+  const arrowManager = createArrowManager({ layer: gameView.projectileLayer, skinManager });
   const sound = createGameSound();
-  const targetManager = createTargetManager({ layer: gameView.targetLayer });
+  const targetManager = createTargetManager({ layer: gameView.targetLayer, skinManager });
 
   petView.element.addEventListener('pet:game-tap', () => {
     if (!isActive || isCharging) {
@@ -316,6 +316,11 @@ export function createBalloonGame({ petView, gameView, petStateMachine, bubbleVi
   }
 
   function updateMousePassThrough(point) {
+    if (isSettingsOpen()) {
+      setMouseIgnore(false);
+      return;
+    }
+
     setMouseIgnore(!isPointNearPet(point));
   }
 
@@ -331,12 +336,18 @@ export function createBalloonGame({ petView, gameView, petStateMachine, bubbleVi
   }
 
   function setMouseIgnore(shouldIgnore) {
-    if (shouldIgnoreMouse === shouldIgnore) {
+    const nextShouldIgnore = isSettingsOpen() ? false : shouldIgnore;
+
+    if (shouldIgnoreMouse === nextShouldIgnore) {
       return;
     }
 
-    shouldIgnoreMouse = shouldIgnore;
-    window.desktopPet.setMouseIgnore(shouldIgnore);
+    shouldIgnoreMouse = nextShouldIgnore;
+    window.desktopPet.setMouseIgnore(nextShouldIgnore);
+  }
+
+  function isSettingsOpen() {
+    return document.body.dataset.settingsOpen === 'true';
   }
 
   function getGameBounds() {

@@ -2,6 +2,9 @@ const { app, BrowserWindow, Notification, ipcMain, Menu, screen } = require('ele
 const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const { pathToFileURL } = require('url');
+const { createCodexStatusReader } = require('../modules/codex/codexStatusReader');
+const { createCodexWatcher, defaultCodexSettings, normalizeCodexSettings } = require('../modules/codex/codexWatcher');
 
 let mainWindow = null;
 let dragState = null;
@@ -9,8 +12,21 @@ let normalWindowBounds = null;
 let settingsWindowBounds = null;
 let petScale = 1;
 let jimengWindow = null;
+let latestCodexSettings = { ...defaultCodexSettings };
 const baseWindowSize = 260;
 const bubbleWindowSpace = 132;
+const codexStatusReader = createCodexStatusReader({
+  defaultFilePath: path.join(app.getAppPath(), 'codex-status.json')
+});
+const codexWatcher = createCodexWatcher({
+  reader: codexStatusReader,
+  onReminder: sendCodexReminder
+});
+const singleInstanceLock = app.requestSingleInstanceLock();
+
+if (!singleInstanceLock) {
+  app.quit();
+}
 
 const defaultSettings = {
   bubbleDurationMs: 3000,
@@ -18,6 +34,9 @@ const defaultSettings = {
   idleSleepDelayMs: 60000,
   petScale: 1,
   languageStyle: 'gentle',
+  skin: {
+    currentSkinId: 'default'
+  },
   weather: {
     city: '北京',
     refreshIntervalMs: 600000,
@@ -28,25 +47,24 @@ const defaultSettings = {
     pollIntervalMs: 30000,
     completionNotification: true
   },
-  codex: {
-    statusPath: '',
-    pollIntervalMs: 15000,
-    usageReminder: true,
-    usageReminderIntervalMs: 5400000,
-    resetReminderDelayMs: 18000000,
-    freshEventWindowMs: 600000
-  },
   calendar: {
     pollIntervalMs: 60000,
     lookAheadMinutes: 1440,
     notifyBeforeMinutes: 10,
     systemNotification: true
   },
+  codexReminderEnabled: true,
+  codexWaitingReminderEnabled: true,
+  codexCompletedReminderEnabled: true,
+  codexFailedReminderEnabled: true,
+  codexPausedReminderEnabled: true,
+  codexCheckInterval: 60000,
+  codexStatusFilePath: '',
   modules: {
     weather: true,
-    codex: true,
     jimeng: true,
     calendar: true,
+    codex: true,
     local: true
   },
   customMessages: {
@@ -88,6 +106,10 @@ function createPetWindow() {
 }
 
 app.whenReady().then(() => {
+  if (!singleInstanceLock) {
+    return;
+  }
+
   createPetWindow();
 
   app.on('activate', () => {
@@ -95,6 +117,20 @@ app.whenReady().then(() => {
       createPetWindow();
     }
   });
+});
+
+app.on('second-instance', () => {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createPetWindow();
+    return;
+  }
+
+  if (mainWindow.isMinimized()) {
+    mainWindow.restore();
+  }
+
+  mainWindow.show();
+  mainWindow.focus();
 });
 
 app.on('window-all-closed', () => {
@@ -132,6 +168,10 @@ ipcMain.handle('pet-drag:move', (event, point) => {
 });
 
 ipcMain.handle('pet-drag:end', () => {
+  if (dragState?.window && settingsWindowBounds) {
+    settingsWindowBounds = dragState.window.getBounds();
+  }
+
   dragState = null;
 });
 
@@ -199,16 +239,25 @@ ipcMain.handle('pet-window:set-settings-panel-visible', (event, isVisible) => {
     return;
   }
 
+  window.setIgnoreMouseEvents(false);
+
   if (settingsWindowBounds) {
-    window.setIgnoreMouseEvents(false);
+    const restoreSourceBounds = settingsWindowBounds;
+
     if (normalWindowBounds) {
       const display = screen.getDisplayMatching(normalWindowBounds);
 
       window.setBounds(display.workArea);
     } else {
-      window.setBounds(getScaledBounds(settingsWindowBounds));
+      window.setBounds(getScaledBounds(restoreSourceBounds));
     }
+
     settingsWindowBounds = null;
+    return;
+  }
+
+  if (!normalWindowBounds) {
+    window.setBounds(getScaledBounds(window.getBounds()));
   }
 });
 
@@ -239,6 +288,49 @@ ipcMain.handle('pet-settings:save', (event, settings) => {
   return nextSettings;
 });
 
+ipcMain.handle('pet-skins:list', () => {
+  return getSkinCatalog();
+});
+
+ipcMain.handle('pet-skins:create', (event, name) => {
+  const catalog = readSkinManifest();
+  const skin = {
+    id: getNextSkinId(catalog.skins),
+    name: normalizeSkinName(name, catalog.skins),
+    builtIn: false,
+    assets: {},
+    createdAt: new Date().toISOString()
+  };
+
+  catalog.skins.push(skin);
+  catalog.currentSkinId = skin.id;
+  writeSkinManifest(catalog);
+  fs.mkdirSync(getSkinDirectory(skin.id), { recursive: true });
+
+  return getSkinById(skin.id);
+});
+
+ipcMain.handle('pet-skins:set-current', (event, skinId) => {
+  const catalog = readSkinManifest();
+
+  if (!catalog.skins.some((skin) => skin.id === skinId)) {
+    return getSkinCatalog();
+  }
+
+  catalog.currentSkinId = skinId;
+  writeSkinManifest(catalog);
+
+  return getSkinCatalog();
+});
+
+ipcMain.handle('pet-skins:delete', (event, skinId) => {
+  return deleteSkin(skinId);
+});
+
+ipcMain.handle('pet-skins:upload-image', (event, payload) => {
+  return uploadSkinImage(payload);
+});
+
 ipcMain.handle('pet-jimeng:check', async (event, statusUrl) => {
   try {
     return await readJimengStatus(statusUrl);
@@ -255,12 +347,34 @@ ipcMain.handle('pet-jimeng:open-page', (event, statusUrl) => {
   openJimengPage(statusUrl, true);
 });
 
-ipcMain.handle('pet-codex:check', (event, codexSettings) => {
-  return readCodexStatus(codexSettings);
-});
-
 ipcMain.handle('pet-calendar:events', (event, options) => {
   return readCalendarEvents(options);
+});
+
+ipcMain.handle('pet-codex:configure', (event, settings) => {
+  latestCodexSettings = normalizeCodexReminderSettings(settings);
+  codexWatcher.updateSettings(latestCodexSettings);
+
+  return {
+    ...latestCodexSettings,
+    statusFilePath: codexWatcher.getStatusFilePath()
+  };
+});
+
+ipcMain.handle('pet-codex:read-status', async () => {
+  const result = await codexWatcher.readNow({ evaluate: false });
+
+  return result ?? codexStatusReader.readStatus(latestCodexSettings.codexStatusFilePath);
+});
+
+ipcMain.handle('pet-codex:set-reminder-enabled', (event, enabled) => {
+  latestCodexSettings = normalizeCodexReminderSettings({
+    ...latestCodexSettings,
+    codexReminderEnabled: Boolean(enabled)
+  });
+  codexWatcher.updateSettings(latestCodexSettings);
+
+  return latestCodexSettings;
 });
 
 ipcMain.handle('pet-notification:jimeng-success', (event, message) => {
@@ -349,14 +463,15 @@ function normalizeSettings(settings = {}) {
     idleSleepDelayMs: normalizeNumber(settings.idleSleepDelayMs, defaultSettings.idleSleepDelayMs, 5000, 1800000),
     petScale: normalizeNumber(settings.petScale, defaultSettings.petScale, 0.5, 1.8),
     languageStyle: normalizeLanguageStyle(settings.languageStyle),
-    modules: {
-      ...defaultSettings.modules,
-      ...(settings.modules ?? {})
+    skin: {
+      ...defaultSettings.skin,
+      ...(settings.skin ?? {})
     },
+    modules: normalizeModules(settings.modules),
     weather: normalizeWeatherSettings(settings.weather),
-    codex: normalizeCodexSettings(settings.codex),
     jimeng: normalizeJimengSettings(settings.jimeng),
     calendar: normalizeCalendarSettings(settings.calendar),
+    ...normalizeCodexReminderSettings(settings),
     customMessages: normalizeMessages(settings.customMessages ?? settings.messages)
   };
 }
@@ -374,6 +489,15 @@ function normalizeMessages(messages = {}) {
 
 function normalizeLanguageStyle(style) {
   return ['gentle', 'lively', 'focus', 'playful'].includes(style) ? style : defaultSettings.languageStyle;
+}
+
+function normalizeModules(modules = {}) {
+  return Object.fromEntries(
+    Object.entries(defaultSettings.modules).map(([name, enabled]) => [
+      name,
+      modules[name] ?? enabled
+    ])
+  );
 }
 
 function normalizeWeatherSettings(weather = {}) {
@@ -396,32 +520,6 @@ function normalizeJimengSettings(jimeng = {}) {
   };
 }
 
-function normalizeCodexSettings(codex = {}) {
-  return {
-    statusPath: String(codex.statusPath ?? defaultSettings.codex.statusPath).trim(),
-    pollIntervalMs: normalizeNumber(codex.pollIntervalMs, defaultSettings.codex.pollIntervalMs, 5000, 300000),
-    usageReminder: codex.usageReminder !== false,
-    usageReminderIntervalMs: normalizeNumber(
-      codex.usageReminderIntervalMs,
-      defaultSettings.codex.usageReminderIntervalMs,
-      60000,
-      21600000
-    ),
-    resetReminderDelayMs: normalizeNumber(
-      codex.resetReminderDelayMs,
-      defaultSettings.codex.resetReminderDelayMs,
-      60000,
-      86400000
-    ),
-    freshEventWindowMs: normalizeNumber(
-      codex.freshEventWindowMs,
-      defaultSettings.codex.freshEventWindowMs,
-      60000,
-      3600000
-    )
-  };
-}
-
 function normalizeCalendarSettings(calendar = {}) {
   return {
     pollIntervalMs: normalizeNumber(calendar.pollIntervalMs, defaultSettings.calendar.pollIntervalMs, 15000, 1800000),
@@ -429,6 +527,20 @@ function normalizeCalendarSettings(calendar = {}) {
     notifyBeforeMinutes: normalizeNumber(calendar.notifyBeforeMinutes, defaultSettings.calendar.notifyBeforeMinutes, 0, 1440),
     systemNotification: calendar.systemNotification !== false
   };
+}
+
+function normalizeCodexReminderSettings(settings = {}) {
+  const codexSettings = normalizeCodexSettings({
+    codexReminderEnabled: settings.codexReminderEnabled,
+    codexWaitingReminderEnabled: settings.codexWaitingReminderEnabled,
+    codexCompletedReminderEnabled: settings.codexCompletedReminderEnabled,
+    codexFailedReminderEnabled: settings.codexFailedReminderEnabled,
+    codexPausedReminderEnabled: settings.codexPausedReminderEnabled,
+    codexCheckInterval: settings.codexCheckInterval,
+    codexStatusFilePath: settings.codexStatusFilePath
+  });
+
+  return codexSettings;
 }
 
 function normalizeNumber(value, fallback, min, max) {
@@ -439,6 +551,14 @@ function normalizeNumber(value, fallback, min, max) {
   }
 
   return Math.min(Math.max(number, min), max);
+}
+
+function sendCodexReminder(reminder) {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return;
+  }
+
+  mainWindow.webContents.send('pet-codex:reminder', reminder);
 }
 
 function readCalendarEvents(options = {}) {
@@ -744,254 +864,6 @@ async function readJimengStatus(statusUrl) {
   };
 }
 
-function readCodexStatus(codexSettings = {}) {
-  const settings = normalizeCodexSettings(codexSettings);
-  const fileStatus = readCodexStatusFile(settings.statusPath);
-  const localStatus = readCodexLocalStatus();
-  const mergedStatus = {
-    ...localStatus,
-    ...fileStatus,
-    source: fileStatus ? 'status-file' : localStatus.source
-  };
-
-  if (mergedStatus.state === 'limited' && !mergedStatus.quotaResetAt) {
-    const resetBase = normalizeOptionalTimestamp(mergedStatus.updatedAt) ?? Date.now();
-
-    mergedStatus.quotaResetAt = new Date(resetBase + settings.resetReminderDelayMs).toISOString();
-  }
-
-  return normalizeCodexStatus(mergedStatus);
-}
-
-function readCodexStatusFile(statusPath) {
-  const resolvedPath = normalizeCodexStatusPath(statusPath);
-
-  try {
-    if (!fs.existsSync(resolvedPath)) {
-      return null;
-    }
-
-    const payload = JSON.parse(fs.readFileSync(resolvedPath, 'utf8'));
-    const status = payload.codex && typeof payload.codex === 'object' ? payload.codex : payload;
-
-    return normalizeCodexStatus({
-      ...status,
-      eventId: status.eventId ?? status.id ?? status.updatedAt ?? fs.statSync(resolvedPath).mtimeMs,
-      updatedAt: status.updatedAt ?? fs.statSync(resolvedPath).mtimeMs
-    });
-  } catch {
-    return {
-      state: 'error',
-      progress: null,
-      message: 'Codex 状态文件暂时读不到。',
-      remainingPercent: null,
-      quotaResetAt: null,
-      eventId: null,
-      updatedAt: Date.now()
-    };
-  }
-}
-
-function normalizeCodexStatusPath(statusPath) {
-  const cleanPath = String(statusPath || '').trim();
-
-  if (cleanPath) {
-    return cleanPath.replace(/^~(?=$|\/)/, app.getPath('home'));
-  }
-
-  return path.join(app.getPath('home'), '.codex', 'desktop-pet-codex-status.json');
-}
-
-function readCodexLocalStatus() {
-  const codexDir = path.join(app.getPath('home'), '.codex');
-  const statePath = path.join(codexDir, 'state_5.sqlite');
-  const latestThread = readLatestCodexThread(statePath);
-
-  if (latestThread && Date.now() - latestThread.updatedAt <= 120000) {
-    return {
-      state: 'running',
-      progress: null,
-      message: `Codex 正在处理：${latestThread.title || '当前任务'}。`,
-      remainingPercent: null,
-      quotaResetAt: null,
-      eventId: `thread-${latestThread.id}-${latestThread.updatedAt}`,
-      updatedAt: latestThread.updatedAt,
-      source: 'threads'
-    };
-  }
-
-  if (latestThread) {
-    return {
-      state: 'idle',
-      progress: null,
-      message: `最近的 Codex 任务是：${latestThread.title || '未命名任务'}。`,
-      remainingPercent: null,
-      quotaResetAt: null,
-      eventId: `thread-${latestThread.id}-${latestThread.updatedAt}`,
-      updatedAt: latestThread.updatedAt,
-      source: 'threads'
-    };
-  }
-
-  return {
-    state: 'idle',
-    progress: null,
-    message: 'Codex 状态还没有可读取的本地记录。',
-    remainingPercent: null,
-    quotaResetAt: null,
-    eventId: null,
-    updatedAt: Date.now(),
-    source: 'fallback'
-  };
-}
-
-function readLatestCodexLogEvent(databasePath, likePattern, threadId) {
-  if (!fs.existsSync(databasePath)) {
-    return null;
-  }
-
-  try {
-    const threadFilter = threadId ? `and thread_id = ${quoteSqlValue(threadId)}` : '';
-    const sql = [
-      '.mode tabs',
-      [
-        'select id, ts from logs',
-        'where id > coalesce((select max(id) - 50000 from logs), 0)',
-        threadFilter,
-        `and feedback_log_body like ${quoteSqlValue(likePattern)}`,
-        'order by id desc limit 1;'
-      ].filter(Boolean).join(' ')
-    ].join('\n');
-    const output = execFileSync('/usr/bin/sqlite3', [databasePath], {
-      input: sql,
-      encoding: 'utf8',
-      timeout: 1200
-    }).trim();
-
-    if (!output) {
-      return null;
-    }
-
-    const [id, ts] = output.split('\t').map((value) => Number(value));
-
-    if (!Number.isFinite(id) || !Number.isFinite(ts)) {
-      return null;
-    }
-
-    return { id, ts };
-  } catch {
-    return null;
-  }
-}
-
-function readLatestCodexThread(databasePath) {
-  if (!fs.existsSync(databasePath)) {
-    return null;
-  }
-
-  try {
-    const projectRoot = path.resolve(__dirname, '../..');
-    const sql = [
-      '.mode tabs',
-      [
-        'select id, title, coalesce(updated_at_ms, updated_at * 1000) as updated_ms',
-        'from threads',
-        `where archived = 0 and cwd = ${quoteSqlValue(projectRoot)}`,
-        'order by updated_ms desc limit 1;'
-      ].join(' ')
-    ].join('\n');
-    const output = execFileSync('/usr/bin/sqlite3', [databasePath], {
-      input: sql,
-      encoding: 'utf8',
-      timeout: 1200
-    }).trim();
-
-    if (!output) {
-      return null;
-    }
-
-    const [id, title, updatedAt] = output.split('\t');
-    const parsedUpdatedAt = Number(updatedAt);
-
-    if (!id || !Number.isFinite(parsedUpdatedAt)) {
-      return null;
-    }
-
-    return {
-      id,
-      title,
-      updatedAt: parsedUpdatedAt
-    };
-  } catch {
-    return null;
-  }
-}
-
-function normalizeCodexStatus(status = {}) {
-  return {
-    state: normalizeCodexState(status.state),
-    progress: normalizeOptionalPercent(status.progress),
-    message: String(status.message || 'Codex 进度监控已开启。'),
-    remainingPercent: normalizeOptionalPercent(status.remainingPercent ?? status.usageRemainingPercent),
-    quotaResetAt: normalizeOptionalIsoDate(status.quotaResetAt ?? status.resetAt),
-    eventId: status.eventId === undefined || status.eventId === null ? null : String(status.eventId),
-    updatedAt: normalizeOptionalTimestamp(status.updatedAt),
-    source: String(status.source || 'unknown')
-  };
-}
-
-function normalizeCodexState(state) {
-  if (['idle', 'running', 'waiting_confirmation', 'completed', 'limited', 'disabled', 'error'].includes(state)) {
-    return state;
-  }
-
-  if (state === 'waiting' || state === 'needs_confirmation') {
-    return 'waiting_confirmation';
-  }
-
-  if (state === 'done' || state === 'success') {
-    return 'completed';
-  }
-
-  return 'idle';
-}
-
-function normalizeOptionalPercent(value) {
-  const number = Number(value);
-
-  if (!Number.isFinite(number)) {
-    return null;
-  }
-
-  return Math.round(Math.min(Math.max(number, 0), 100));
-}
-
-function normalizeOptionalTimestamp(value) {
-  const number = Number(value);
-
-  if (Number.isFinite(number)) {
-    return number < 100000000000 ? number * 1000 : number;
-  }
-
-  const parsed = Date.parse(value);
-
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function normalizeOptionalIsoDate(value) {
-  const parsed = Date.parse(value);
-
-  if (!Number.isFinite(parsed)) {
-    return null;
-  }
-
-  return new Date(parsed).toISOString();
-}
-
-function quoteSqlValue(value) {
-  return `'${String(value).replace(/'/g, "''")}'`;
-}
-
 function openJimengPage(statusUrl, visible) {
   const url = normalizeJimengUrl(statusUrl);
 
@@ -1240,4 +1112,187 @@ function getScaledBounds(bounds) {
     width: nextBounds.width,
     height: nextBounds.height
   };
+}
+
+function getSkinsRoot() {
+  return path.join(app.getPath('userData'), 'skins');
+}
+
+function getSkinManifestPath() {
+  return path.join(getSkinsRoot(), 'manifest.json');
+}
+
+function getSkinDirectory(skinId) {
+  return path.join(getSkinsRoot(), skinId);
+}
+
+function readSkinManifest() {
+  const defaultManifest = {
+    currentSkinId: 'default',
+    skins: [
+      {
+        id: 'default',
+        name: '默认皮肤',
+        builtIn: true,
+        assets: {}
+      }
+    ]
+  };
+
+  try {
+    const manifest = JSON.parse(fs.readFileSync(getSkinManifestPath(), 'utf8'));
+    const skins = Array.isArray(manifest.skins) ? manifest.skins : [];
+    const hasDefault = skins.some((skin) => skin.id === 'default');
+
+    return {
+      ...defaultManifest,
+      ...manifest,
+      skins: hasDefault ? skins : [defaultManifest.skins[0], ...skins]
+    };
+  } catch {
+    fs.mkdirSync(getSkinsRoot(), { recursive: true });
+    writeSkinManifest(defaultManifest);
+
+    return defaultManifest;
+  }
+}
+
+function writeSkinManifest(catalog) {
+  fs.mkdirSync(getSkinsRoot(), { recursive: true });
+  fs.writeFileSync(getSkinManifestPath(), JSON.stringify(catalog, null, 2), 'utf8');
+}
+
+function getSkinCatalog() {
+  const catalog = readSkinManifest();
+
+  return {
+    currentSkinId: catalog.currentSkinId || 'default',
+    skins: catalog.skins.map((skin) => hydrateSkin(skin))
+  };
+}
+
+function getSkinById(skinId) {
+  const catalog = getSkinCatalog();
+
+  return catalog.skins.find((skin) => skin.id === skinId) ?? catalog.skins[0];
+}
+
+function hydrateSkin(skin) {
+  const assets = {};
+
+  Object.entries(skin.assets ?? {}).forEach(([category, actions]) => {
+    assets[category] = {};
+
+    Object.entries(actions ?? {}).forEach(([action, asset]) => {
+      if (!asset?.filename) {
+        return;
+      }
+
+      const filePath = path.join(getSkinDirectory(skin.id), asset.filename);
+
+      assets[category][action] = {
+        ...asset,
+        filePath,
+        src: getVersionedFileUrl(filePath)
+      };
+    });
+  });
+
+  return {
+    ...skin,
+    assets
+  };
+}
+
+function uploadSkinImage(payload = {}) {
+  const { skinId, category, action, filePath } = payload;
+  const catalog = readSkinManifest();
+  const skin = catalog.skins.find((item) => item.id === skinId && !item.builtIn);
+
+  if (!skin || !isAllowedSkinImage(filePath)) {
+    return getSkinById(skinId || 'default');
+  }
+
+  const extension = path.extname(filePath).toLowerCase();
+  const filename = `${sanitizeFileSegment(category)}-${sanitizeFileSegment(action)}${extension}`;
+  const destinationDirectory = getSkinDirectory(skin.id);
+  const destinationPath = path.join(destinationDirectory, filename);
+
+  fs.mkdirSync(destinationDirectory, { recursive: true });
+  fs.copyFileSync(filePath, destinationPath);
+
+  skin.assets = skin.assets || {};
+  skin.assets[category] = skin.assets[category] || {};
+  skin.assets[category][action] = {
+    filename,
+    updatedAt: new Date().toISOString()
+  };
+  catalog.currentSkinId = skin.id;
+  writeSkinManifest(catalog);
+
+  return getSkinById(skin.id);
+}
+
+function getVersionedFileUrl(filePath) {
+  try {
+    const stat = fs.statSync(filePath);
+
+    return `${pathToFileURL(filePath).href}?v=${Math.round(stat.mtimeMs)}`;
+  } catch {
+    return '';
+  }
+}
+
+function deleteSkin(skinId) {
+  const catalog = readSkinManifest();
+  const skin = catalog.skins.find((item) => item.id === skinId);
+
+  if (!skin || skin.builtIn) {
+    return getSkinCatalog();
+  }
+
+  catalog.skins = catalog.skins.filter((item) => item.id !== skinId);
+
+  if (catalog.currentSkinId === skinId) {
+    catalog.currentSkinId = 'default';
+  }
+
+  writeSkinManifest(catalog);
+  fs.rmSync(getSkinDirectory(skinId), { recursive: true, force: true });
+
+  return getSkinCatalog();
+}
+
+function getNextSkinId(skins) {
+  let index = 1;
+  let id = '';
+
+  do {
+    id = `custom-${String(index).padStart(3, '0')}`;
+    index += 1;
+  } while (skins.some((skin) => skin.id === id));
+
+  return id;
+}
+
+function normalizeSkinName(name, skins) {
+  const trimmedName = String(name || '').trim();
+
+  if (trimmedName) {
+    return trimmedName;
+  }
+
+  const customCount = skins.filter((skin) => !skin.builtIn).length + 1;
+
+  return `自定义皮肤 ${customCount}`;
+}
+
+function isAllowedSkinImage(filePath) {
+  const extension = path.extname(String(filePath || '')).toLowerCase();
+
+  return ['.png', '.jpg', '.jpeg', '.webp'].includes(extension) && fs.existsSync(filePath);
+}
+
+function sanitizeFileSegment(value) {
+  return String(value || '').replace(/[^a-z0-9-]/gi, '-').toLowerCase();
 }

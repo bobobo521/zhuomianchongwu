@@ -31,6 +31,21 @@ contextBridge.exposeInMainWorld('desktopPet', {
   saveSettings(settings) {
     return ipcRenderer.invoke('pet-settings:save', settings);
   },
+  listSkins() {
+    return ipcRenderer.invoke('pet-skins:list');
+  },
+  createSkin(name) {
+    return ipcRenderer.invoke('pet-skins:create', name);
+  },
+  setCurrentSkin(skinId) {
+    return ipcRenderer.invoke('pet-skins:set-current', skinId);
+  },
+  deleteSkin(skinId) {
+    return ipcRenderer.invoke('pet-skins:delete', skinId);
+  },
+  uploadSkinImage(payload) {
+    return ipcRenderer.invoke('pet-skins:upload-image', payload);
+  },
   checkJimengStatus(statusUrl) {
     return ipcRenderer.invoke('pet-jimeng:check', statusUrl);
   },
@@ -40,14 +55,20 @@ contextBridge.exposeInMainWorld('desktopPet', {
   getCalendarEvents(options) {
     return ipcRenderer.invoke('pet-calendar:events', options);
   },
+  configureCodexReminder(settings) {
+    return ipcRenderer.invoke('pet-codex:configure', settings);
+  },
+  readCodexStatus() {
+    return ipcRenderer.invoke('pet-codex:read-status');
+  },
+  setCodexReminderEnabled(enabled) {
+    return ipcRenderer.invoke('pet-codex:set-reminder-enabled', enabled);
+  },
   notifyJimengSuccess(message) {
     return ipcRenderer.invoke('pet-notification:jimeng-success', message);
   },
   notifyCalendarEvent(payload) {
     return ipcRenderer.invoke('pet-notification:calendar-event', payload);
-  },
-  checkCodexStatus(settings) {
-    return ipcRenderer.invoke('pet-codex:check', settings);
   },
   onMenuCommand(callback) {
     const listener = (event, payload) => {
@@ -58,6 +79,17 @@ contextBridge.exposeInMainWorld('desktopPet', {
 
     return () => {
       ipcRenderer.removeListener('pet-menu:command', listener);
+    };
+  },
+  onCodexReminder(callback) {
+    const listener = (event, payload) => {
+      callback(payload);
+    };
+
+    ipcRenderer.on('pet-codex:reminder', listener);
+
+    return () => {
+      ipcRenderer.removeListener('pet-codex:reminder', listener);
     };
   }
 });

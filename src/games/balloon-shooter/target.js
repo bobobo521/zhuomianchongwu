@@ -1,11 +1,11 @@
-import { applyImageAsset, getGameAsset } from '../../assetMap.js';
+import { applyImageAsset } from '../../assetMap.js';
 
 const targetSize = {
   width: 64,
   height: 72
 };
 
-export function createTargetManager({ layer }) {
+export function createTargetManager({ layer, skinManager }) {
   let target = null;
   let respawnTimer = null;
 
@@ -25,7 +25,7 @@ export function createTargetManager({ layer }) {
       moveSpeed: 1.5,
       width: targetSize.width,
       height: targetSize.height,
-      element: createTargetElement()
+      element: createTargetElement(skinManager)
     };
 
     setTargetPosition(target);
@@ -54,8 +54,8 @@ export function createTargetManager({ layer }) {
     }
 
     const hitTarget = target;
-    setTargetImage(hitTarget.element, 'targetHit');
-    addHitEffect(hitTarget.element);
+    setTargetImage(hitTarget.element, skinManager, 'targetHit');
+    addHitEffect(hitTarget.element, skinManager);
     hitTarget.element.classList.add('game-target--hit');
     target = null;
 
@@ -90,35 +90,35 @@ export function createTargetManager({ layer }) {
   };
 }
 
-function createTargetElement() {
+function createTargetElement(skinManager) {
   const element = document.createElement('div');
   element.className = 'game-target';
   const image = document.createElement('img');
 
   image.className = 'game-target__image';
   image.alt = '';
-  applyImageAsset(image, getGameAsset('target'));
+  applyImageAsset(image, skinManager.getActionAsset('game', 'target'));
   element.append(image);
 
   return element;
 }
 
-function setTargetImage(element, assetName) {
+function setTargetImage(element, skinManager, assetName) {
   const image = element.querySelector('.game-target__image');
 
   if (!image) {
     return;
   }
 
-  applyImageAsset(image, getGameAsset(assetName));
+  applyImageAsset(image, skinManager.getActionAsset('game', assetName));
 }
 
-function addHitEffect(element) {
+function addHitEffect(element, skinManager) {
   const effect = document.createElement('img');
 
   effect.className = 'game-hit-effect';
   effect.alt = '';
-  applyImageAsset(effect, getGameAsset('hitEffect'));
+  applyImageAsset(effect, skinManager.getActionAsset('game', 'hitEffect'));
   element.append(effect);
 }
 

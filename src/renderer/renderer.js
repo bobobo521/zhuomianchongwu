@@ -8,8 +8,8 @@ import { createLocalMessageProvider } from './modules/localMessageProvider.js';
 import { createInformationModuleRegistry } from './modules/InformationModuleRegistry.js';
 import { createWeatherService } from './modules/weatherService.js';
 import { createJimengService } from './modules/jimengService.js';
-import { createCodexService } from './modules/codexService.js';
 import { createCalendarService } from './modules/calendarService.js';
+import { createCodexService } from './modules/codexService.js';
 import { createModeController } from './modes/ModeController.js';
 import { createContextMenuController } from './modes/ContextMenuController.js';
 import { createGameView } from './game/GameView.js';
@@ -17,23 +17,22 @@ import { createGameController } from './game/GameController.js';
 import { createGameRegistry } from './game/GameRegistry.js';
 import { createSettingsStore } from './settings/SettingsStore.js';
 import { createSettingsPanel } from './settings/SettingsPanel.js';
+import { createSkinManager } from '../skin/skinManager.js';
 import { createBalloonGame } from '../games/balloon-shooter/balloonGame.js';
 
 const app = document.querySelector('#app');
 const settingsStore = await createSettingsStore(window.desktopPet);
-const petView = createPetView();
+const skinManager = await createSkinManager({
+  skinApi: window.desktopPet,
+  initialSkinId: settingsStore.getSettings().skin.currentSkinId
+});
+const petView = createPetView({ skinManager });
 const bubbleView = createBubbleView();
 const gameView = createGameView();
 const petStateMachine = createPetStateMachine();
 const modeController = createModeController();
 const messageProvider = createLocalMessageProvider();
 const weatherService = createWeatherService({ settingsStore });
-const codexService = createCodexService({
-  settingsStore,
-  codexApi: window.desktopPet,
-  bubbleView,
-  petView
-});
 const jimengService = createJimengService({
   settingsStore,
   jimengApi: window.desktopPet,
@@ -46,19 +45,26 @@ const calendarService = createCalendarService({
   bubbleView,
   petView
 });
+const codexService = createCodexService({
+  settingsStore,
+  codexApi: window.desktopPet,
+  bubbleView,
+  petView
+});
 const informationModuleRegistry = createInformationModuleRegistry({
   messageProvider,
   weatherService,
-  codexService,
   jimengService,
-  calendarService
+  calendarService,
+  codexService
 });
 const gameRegistry = createGameRegistry();
 const balloonGame = createBalloonGame({
   petView,
   gameView,
   petStateMachine,
-  bubbleView
+  bubbleView,
+  skinManager
 });
 gameRegistry.register(balloonGame);
 const gameController = createGameController({
@@ -73,6 +79,8 @@ const settingsPanel = createSettingsPanel({
   petView,
   gameController,
   jimengService,
+  codexService,
+  skinManager,
   panelApi: window.desktopPet
 });
 const pointerPassthroughController = createPointerPassthroughController({
@@ -81,6 +89,8 @@ const pointerPassthroughController = createPointerPassthroughController({
   settingsPanel,
   pointerApi: window.desktopPet
 });
+let previousSkinId = skinManager.getState().currentSkinId;
+let hasRenderedInitialSkin = false;
 
 app.append(bubbleView.element);
 app.append(gameView.element);
@@ -94,6 +104,33 @@ settingsStore.subscribe((settings) => {
   petView.setScale(settings.petScale);
   gameController.setPetScale(settings.petScale);
   window.desktopPet.setPetScale(settings.petScale);
+});
+
+skinManager.subscribe((state) => {
+  const skinSettings = settingsStore.getSettings().skin;
+  const didChangeSkin = hasRenderedInitialSkin && state.currentSkinId !== previousSkinId;
+
+  if (state.currentSkinId !== skinSettings.currentSkinId) {
+    settingsStore.update({
+      ...settingsStore.getSettings(),
+      skin: {
+        ...skinSettings,
+        currentSkinId: state.currentSkinId
+      }
+    });
+  }
+
+  bubbleView.setSkin(state.currentSkin);
+  petView.setPersistentAction('normal', 'idle');
+
+  if (didChangeSkin) {
+    bubbleView.showSkinChange(state.currentSkin, {
+      anchorElement: petView.element
+    });
+  }
+
+  previousSkinId = state.currentSkinId;
+  hasRenderedInitialSkin = true;
 });
 
 petStateMachine.subscribe((state) => {
@@ -142,5 +179,4 @@ createContextMenuController({
 });
 
 jimengService.start();
-codexService.start();
 calendarService.start();

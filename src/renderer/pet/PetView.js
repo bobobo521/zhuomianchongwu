@@ -1,4 +1,4 @@
-import { applyImageAsset, getPetActionAsset } from '../../assetMap.js';
+import { applyImageAsset } from '../../assetMap.js';
 
 const stateActionMap = {
   idle: 'idle',
@@ -7,7 +7,7 @@ const stateActionMap = {
   sleepy: 'sleep'
 };
 
-export function createPetView() {
+export function createPetView({ skinManager }) {
   const element = document.createElement('button');
   element.className = 'pet pet--idle';
   element.type = 'button';
@@ -39,7 +39,7 @@ export function createPetView() {
   }
 
   function setAction(category, action, options = {}) {
-    const asset = getPetActionAsset(category, action);
+    const asset = skinManager.getActionAsset(category, action);
 
     imageElement.hidden = false;
     imageElement.alt = `${category}-${action}`;

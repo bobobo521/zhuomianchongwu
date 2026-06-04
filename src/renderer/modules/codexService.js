@@ -1,10 +1,19 @@
-const defaultStatus = {
-  state: 'idle',
-  progress: null,
-  message: 'Codex 进度监控已开启，我会留意需要确认和完成提醒。',
-  remainingPercent: null,
-  quotaResetAt: null,
-  eventId: null
+const statusActions = {
+  idle: 'idle',
+  running: 'thinking',
+  waiting: 'alert',
+  completed: 'confirm',
+  failed: 'error',
+  paused: 'thinking'
+};
+
+const statusBubbleTypes = {
+  idle: 'normal',
+  running: 'normal',
+  waiting: 'warning',
+  completed: 'success',
+  failed: 'error',
+  paused: 'warning'
 };
 
 export function createCodexService({
@@ -14,280 +23,127 @@ export function createCodexService({
   petView
 }) {
   let settings = settingsStore.getSettings();
-  let timer = null;
-  let usageTimer = null;
-  let resetTimer = null;
-  let scheduledResetKey = null;
-  let lastStatus = defaultStatus;
-  let lastStickyEventId = null;
-  let lastResetKey = null;
-  let hasSeenInitialStatus = false;
-  let isChecking = false;
+  let lastStatusResult = null;
 
   settingsStore.subscribe((nextSettings) => {
     settings = nextSettings;
-    schedule();
-    scheduleUsageReminder();
+    configureWatcher();
+  });
+
+  codexApi?.onCodexReminder?.((reminder) => {
+    if (!settings.modules.codex || !settings.codexReminderEnabled) {
+      return;
+    }
+
+    const statusName = normalizeStatusName(reminder?.status?.status);
+    const action = reminder?.action || statusActions[statusName] || 'idle';
+    const type = reminder?.type || statusBubbleTypes[statusName] || 'normal';
+
+    petView?.playAction('normal', action, { duration: 900 });
+    bubbleView?.show(reminder?.message || 'Codex 状态更新了。', {
+      duration: type === 'error' ? 5200 : 4200,
+      type,
+      anchorElement: petView?.element
+    });
   });
 
   async function getMessage() {
-    const status = await checkNow();
+    const result = await checkNow();
 
-    return status.message;
+    return formatStatusSummary(result.status);
   }
 
   async function checkNow() {
-    if (!settings.modules.codex) {
+    if (!codexApi?.readCodexStatus) {
       return {
-        ...defaultStatus,
-        state: 'disabled',
-        message: 'Codex 进度模块已关闭。'
+        ok: false,
+        status: {
+          status: 'idle',
+          progress: 0,
+          taskName: '',
+          message: 'Codex 状态接口还没准备好。'
+        }
       };
     }
 
-    if (!codexApi?.checkCodexStatus) {
-      return {
-        ...defaultStatus,
-        state: 'error',
-        message: 'Codex 本地读取接口还没准备好。'
-      };
-    }
+    lastStatusResult = await codexApi.readCodexStatus();
 
-    const status = normalizeStatus(await codexApi.checkCodexStatus(settings.codex));
-
-    handleStatus(status);
-
-    return status;
+    return lastStatusResult;
   }
 
-  function start() {
-    schedule();
-    scheduleUsageReminder();
-  }
-
-  function stop() {
-    if (timer) {
-      clearTimeout(timer);
-      timer = null;
-    }
-
-    if (usageTimer) {
-      clearTimeout(usageTimer);
-      usageTimer = null;
-    }
-
-    if (resetTimer) {
-      clearTimeout(resetTimer);
-      resetTimer = null;
-      scheduledResetKey = null;
-    }
-  }
-
-  function schedule() {
-    if (timer) {
-      clearTimeout(timer);
-      timer = null;
-    }
-
-    if (!settings.modules.codex) {
-      return;
-    }
-
-    timer = setTimeout(runScheduledCheck, settings.codex.pollIntervalMs);
-  }
-
-  async function runScheduledCheck() {
-    if (isChecking) {
-      schedule();
-      return;
-    }
-
-    isChecking = true;
-
-    try {
-      await checkNow();
-    } catch {
-      lastStatus = {
-        ...lastStatus,
-        state: 'error',
-        message: 'Codex 状态暂时读不到，稍后我再看。'
-      };
-    } finally {
-      isChecking = false;
-      schedule();
-    }
-  }
-
-  function handleStatus(status) {
-    const previousStatus = lastStatus;
-
-    lastStatus = status;
-    maybeShowStickyStatus(status, previousStatus);
-    maybeScheduleResetReminder(status);
-  }
-
-  function maybeShowStickyStatus(status, previousStatus) {
-    const isStickyState = status.state === 'waiting_confirmation' || status.state === 'completed';
-
-    if (!isStickyState || !status.eventId || status.eventId === lastStickyEventId) {
-      hasSeenInitialStatus = true;
-      return;
-    }
-
-    const isFresh = !status.updatedAt || Date.now() - status.updatedAt <= settings.codex.freshEventWindowMs;
-    const stateChanged = status.state !== previousStatus.state;
-
-    if (!hasSeenInitialStatus || !isFresh || (!stateChanged && previousStatus.eventId === status.eventId)) {
-      lastStickyEventId = status.eventId;
-      hasSeenInitialStatus = true;
-      return;
-    }
-
-    lastStickyEventId = status.eventId;
-    hasSeenInitialStatus = true;
-
-    petView?.playAction('normal', status.state === 'completed' ? 'confirm' : 'surprised', { duration: 900 });
-    bubbleView?.show(status.message, {
-      sticky: true,
-      anchorElement: petView?.element
+  async function setReminderEnabled(enabled) {
+    const nextSettings = await settingsStore.update({
+      ...settings,
+      codexReminderEnabled: Boolean(enabled)
     });
+
+    settings = nextSettings;
+    await codexApi?.setCodexReminderEnabled?.(Boolean(enabled));
+
+    return settings;
   }
 
-  function scheduleUsageReminder() {
-    if (usageTimer) {
-      clearTimeout(usageTimer);
-      usageTimer = null;
-    }
-
-    if (!settings.modules.codex || !settings.codex.usageReminder) {
-      return;
-    }
-
-    usageTimer = setTimeout(async () => {
-      usageTimer = null;
-      await showUsageReminder();
-      scheduleUsageReminder();
-    }, settings.codex.usageReminderIntervalMs);
+  async function toggleReminderEnabled() {
+    return setReminderEnabled(!settings.codexReminderEnabled);
   }
 
-  async function showUsageReminder() {
-    let status = lastStatus;
-
-    try {
-      status = await checkNow();
-    } catch {
-      status = lastStatus;
-    }
-
-    if (!settings.modules.codex) {
-      return;
-    }
-
-    const percent = normalizePercent(status.remainingPercent);
-    const message = percent === null
-      ? 'Codex 额度情况我还没读到，灵感来了可以先用起来。'
-      : `Codex 剩余额度约 ${percent}%，别让灵感闲着，赶紧去用一点。`;
-
-    petView?.playAction('normal', 'talk', { duration: 700 });
-    bubbleView?.show(message, {
-      anchorElement: petView?.element
+  function configureWatcher() {
+    codexApi?.configureCodexReminder?.({
+      ...settings,
+      codexReminderEnabled: Boolean(settings.modules.codex && settings.codexReminderEnabled)
     });
-  }
-
-  function maybeScheduleResetReminder(status) {
-    const resetAt = Date.parse(status.quotaResetAt || '');
-
-    if (!Number.isFinite(resetAt) || resetAt <= Date.now()) {
-      if (resetTimer) {
-        clearTimeout(resetTimer);
-        resetTimer = null;
-        scheduledResetKey = null;
-      }
-      return;
-    }
-
-    const resetKey = new Date(resetAt).toISOString();
-
-    if (scheduledResetKey === resetKey) {
-      return;
-    }
-
-    if (resetTimer) {
-      clearTimeout(resetTimer);
-      resetTimer = null;
-    }
-
-    scheduledResetKey = resetKey;
-    const delay = Math.min(resetAt - Date.now(), 2147483647);
-
-    resetTimer = setTimeout(() => {
-      resetTimer = null;
-      scheduledResetKey = null;
-
-      if (lastResetKey === resetKey || !settings.modules.codex) {
-        return;
-      }
-
-      lastResetKey = resetKey;
-      petView?.playAction('normal', 'confirm', { duration: 900 });
-      bubbleView?.show('Codex 额度已重置，可以继续创作了。', {
-        anchorElement: petView?.element
-      });
-    }, delay);
   }
 
   function getLastMessage() {
-    return lastStatus.message || defaultStatus.message;
+    return lastStatusResult?.status
+      ? formatStatusSummary(lastStatusResult.status)
+      : 'Codex 状态提醒已开启，我会留意任务进度。';
   }
 
   return {
-    start,
-    stop,
     getMessage,
     checkNow,
+    setReminderEnabled,
+    toggleReminderEnabled,
     getLastMessage
   };
 }
 
-function normalizeStatus(status = {}) {
-  return {
-    ...defaultStatus,
-    ...status,
-    state: normalizeState(status.state),
-    progress: normalizePercent(status.progress),
-    remainingPercent: normalizePercent(status.remainingPercent),
-    message: String(status.message || defaultStatus.message),
-    eventId: status.eventId === null || status.eventId === undefined ? null : String(status.eventId),
-    updatedAt: normalizeTimestamp(status.updatedAt)
-  };
-}
+function formatStatusSummary(status = {}) {
+  const statusName = normalizeStatusName(status.status);
+  const taskName = compactText(status.taskName || '暂无任务', 48);
+  const progress = normalizeProgress(status.progress);
+  const message = compactText(status.message || 'Codex 当前空闲', 120);
 
-function normalizeState(state) {
-  if (['idle', 'running', 'waiting_confirmation', 'completed', 'limited', 'disabled', 'error'].includes(state)) {
-    return state;
+  if (statusName === 'running') {
+    return `Codex 正在处理：${taskName}\n当前进度：${progress}%\n${message}`;
   }
 
-  return defaultStatus.state;
+  return `Codex 状态：${statusName}\n任务：${taskName}\n进度：${progress}%\n说明：${message}`;
 }
 
-function normalizePercent(value) {
-  const number = Number(value);
+function normalizeStatusName(statusName) {
+  return ['idle', 'running', 'waiting', 'completed', 'failed', 'paused'].includes(statusName)
+    ? statusName
+    : 'idle';
+}
+
+function normalizeProgress(progress) {
+  const number = Number(progress);
 
   if (!Number.isFinite(number)) {
-    return null;
+    return 0;
   }
 
   return Math.round(Math.min(Math.max(number, 0), 100));
 }
 
-function normalizeTimestamp(value) {
-  const number = Number(value);
+function compactText(value, maxLength) {
+  const text = String(value || '').replace(/\s+/g, ' ').trim();
 
-  if (Number.isFinite(number)) {
-    return number < 100000000000 ? number * 1000 : number;
+  if (text.length <= maxLength) {
+    return text;
   }
 
-  const parsed = Date.parse(value);
-
-  return Number.isFinite(parsed) ? parsed : null;
+  return `${text.slice(0, maxLength - 1)}…`;
 }

@@ -1,4 +1,5 @@
 node_modules/
+.local-node/
 .electron-cache/
 .npm-cache/
 .tools/
@@ -15,4 +16,3 @@ out/
 
 *.tmp
 *.bak
-

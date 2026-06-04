@@ -1,7 +1,6 @@
 const commandModuleMap = {
   'show-local-message': 'local',
   'show-weather': 'weather',
-  'show-codex-status': 'codex',
   'show-jimeng-status': 'jimeng'
 };
 
@@ -50,7 +49,7 @@ export function createContextMenuController({
     }
 
     const message = await informationModuleRegistry.getMessage(moduleName);
-    petView?.playAction('normal', 'talk', { duration: 700 });
+    petView?.playAction('normal', moduleName === 'codex' ? 'thinking' : 'talk', { duration: 700 });
     bubbleView.show(message, {
       duration: 2600,
       anchorElement: bubbleAnchorElement
